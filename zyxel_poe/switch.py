@@ -24,7 +24,6 @@ _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(minutes=1)
 
 CONF_DEVICES = 'devices'
-CONF_KNOWN_HOSTS = 'known_hosts'
 
 DEVICES_SCHEMA = vol.Schema({
     vol.Required(CONF_HOST): cv.string,
@@ -33,7 +32,6 @@ DEVICES_SCHEMA = vol.Schema({
 })
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-    vol.Optional(CONF_KNOWN_HOSTS) : cv.string,
     vol.Required(CONF_DEVICES): vol.All(cv.ensure_list, [DEVICES_SCHEMA]),
 })
 
@@ -73,8 +71,7 @@ def parse_cookie(text):
 
 async def async_setup_platform(
         hass, config, async_add_entities, discovery_info=None):
-    """Set up the AfterShip sensor platform."""
-    known_hosts = hass.config.path(config.get(CONF_KNOWN_HOSTS))
+    """Set up the zyxel-poe sensor platform."""
 
     for device_config in config[CONF_DEVICES]:
         host = device_config[CONF_HOST]
@@ -84,7 +81,7 @@ async def async_setup_platform(
 
         session = async_create_clientsession(hass, cookie_jar=aiohttp.CookieJar(unsafe=True))
 
-        poe_data = ZyxelPoeData(host, username, password, known_hosts, interval, session)
+        poe_data = ZyxelPoeData(host, username, password, interval, session)
 
         await poe_data.async_update()
 
@@ -131,14 +128,13 @@ class ZyxelPoeSwitch(SwitchEntity):
         await self._poe_data.async_update()
 
 class ZyxelPoeData:
-    def __init__(self, host, username, password, known_hosts, interval, session):
+    def __init__(self, host, username, password, interval, session):
         self.devices = {}
         self.ports = {}
 
         self._url = "http://{}/cgi-bin/dispatcher.cgi".format(host)
         self._username = username
         self._password = password
-        self._known_hosts = known_hosts
         self._session = session
 
         self.async_update = Throttle(interval)(self._async_update)
