@@ -15,6 +15,7 @@ To use this plugin, copy the `zyxel_poe` folder into your [custom_components fol
 # Example configuration.yaml entry
 switch:
 - platform: zyxel_poe
+  known_hosts: zyxel_known_hosts
   devices:
   - host: switch1.local
     username: admin

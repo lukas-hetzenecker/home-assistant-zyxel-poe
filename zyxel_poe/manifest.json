@@ -1,0 +1,14 @@
+{
+  "domain": "zyxel_poe",
+  "name": "ZyXEL",
+  "documentation": "https://github.com/lukas-hetzenecker/home-assistant-zyxel-poe",
+  "dependencies": [],
+  "codeowners": [
+    "@lukas-hetzenecker"
+  ],
+  "requirements": ["beautifulsoup4"],
+  "zeroconf": [
+  ],
+  "version": "0.1",
+  "iot_class": "local_polling"
+}

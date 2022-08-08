@@ -11,7 +11,7 @@ from aiohttp import ClientResponse
 import voluptuous as vol
 
 from homeassistant.const import STATE_ON, STATE_OFF
-from homeassistant.components.switch import PLATFORM_SCHEMA, SwitchDevice
+from homeassistant.components.switch import PLATFORM_SCHEMA, SwitchEntity
 from homeassistant.const import CONF_HOST, CONF_USERNAME, CONF_PASSWORD, CONF_SCAN_INTERVAL
 import homeassistant.helpers.config_validation as cv
 from homeassistant.util import Throttle
@@ -24,6 +24,7 @@ _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(minutes=1)
 
 CONF_DEVICES = 'devices'
+CONF_KNOWN_HOSTS = 'known_hosts'
 
 DEVICES_SCHEMA = vol.Schema({
     vol.Required(CONF_HOST): cv.string,
@@ -32,27 +33,10 @@ DEVICES_SCHEMA = vol.Schema({
 })
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
+    vol.Optional(CONF_KNOWN_HOSTS) : cv.string,
     vol.Required(CONF_DEVICES): vol.All(cv.ensure_list, [DEVICES_SCHEMA]),
 })
 
-
-# Fucking ZyXel returns an malformed http response
-# and aiohttp doesn't know how to handle that
-# we get the following exception: data: 400, message='invalid character in header'
-# Fucking hack to fix this fucking data
-class FixClientResponse(ClientResponse):
-    async def start(self, connection: 'Connection') -> 'ClientResponse':
-        _orig_data_received = connection.protocol.data_received
-
-        def _data_received(data: bytes) -> None:
-            if not data:
-                return
-            data = data.replace(b'Connection: close\r\n<html>', b'Connection: close\r\n\n\n<html>')
-            _orig_data_received(data)
-
-        connection.protocol.data_received = _data_received
-
-        return await ClientResponse.start(self, connection)
 
 # from: https://github.com/jonbulica99/zyxel-poe-manager
 def current_time():
@@ -90,15 +74,17 @@ def parse_cookie(text):
 async def async_setup_platform(
         hass, config, async_add_entities, discovery_info=None):
     """Set up the AfterShip sensor platform."""
+    known_hosts = hass.config.path(config.get(CONF_KNOWN_HOSTS))
+
     for device_config in config[CONF_DEVICES]:
         host = device_config[CONF_HOST]
         username = device_config[CONF_USERNAME]
         password = device_config[CONF_PASSWORD]
         interval = device_config.get(CONF_SCAN_INTERVAL, SCAN_INTERVAL)
 
-        session = async_create_clientsession(hass, cookie_jar=aiohttp.CookieJar(unsafe=True), response_class=FixClientResponse)
+        session = async_create_clientsession(hass, cookie_jar=aiohttp.CookieJar(unsafe=True))
 
-        poe_data = ZyxelPoeData(host, username, password, interval, session)
+        poe_data = ZyxelPoeData(host, username, password, known_hosts, interval, session)
 
         await poe_data.async_update()
 
@@ -108,7 +94,7 @@ async def async_setup_platform(
 
         async_add_entities(switches, False)
 
-class ZyxelPoeSwitch(SwitchDevice):
+class ZyxelPoeSwitch(SwitchEntity):
     def __init__(self, poe_data, host, port):
         self._poe_data = poe_data
         self._host = host
@@ -137,7 +123,7 @@ class ZyxelPoeSwitch(SwitchDevice):
         return self._poe_data.ports[self._port]['state']
 
     @property
-    def device_state_attributes(self):
+    def extra_state_attributes(self):
         """Return attributes for the sensor."""
         return self._poe_data.ports[self._port]
 
@@ -145,13 +131,14 @@ class ZyxelPoeSwitch(SwitchDevice):
         await self._poe_data.async_update()
 
 class ZyxelPoeData:
-    def __init__(self, host, username, password, interval, session):
+    def __init__(self, host, username, password, known_hosts, interval, session):
         self.devices = {}
         self.ports = {}
 
         self._url = "http://{}/cgi-bin/dispatcher.cgi".format(host)
         self._username = username
         self._password = password
+        self._known_hosts = known_hosts
         self._session = session
 
         self.async_update = Throttle(interval)(self._async_update)
