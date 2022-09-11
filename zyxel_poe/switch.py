@@ -37,10 +37,6 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 
 
 # from: https://github.com/jonbulica99/zyxel-poe-manager
-def current_time():
-    return int(time() * 1000.0)
-
-
 def encode(_input):
     # The python representation of the JS function with the same name.
     # This could be improved further, but I can't be bothered.
@@ -48,26 +44,22 @@ def encode(_input):
     possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
     _len = lenn = len(_input)
     i = 1
-    while i <= (320-_len):
-        if (0 == i % 7 and _len > 0):
+    while i <= (321 - _len):
+        if 0 == i % 5 and _len > 0:
             _len -= 1
             password += _input[_len]
-        elif (i == 123):
-          if (lenn < 10):
-            password += "0"
-          else:
-            password += str(math.floor(lenn/10))
-        elif (i == 289):
-          password += str(lenn % 10)
+        elif i == 123:
+            if lenn < 10:
+                password += "0"
+            else:
+                password += str(math.floor(lenn / 10))
+        elif i == 289:
+            password += str(lenn % 10)
         else:
-          password += possible[math.floor(random() * len(possible))]
+            password += possible[math.floor(random() * len(possible))]
         i += 1
     return password
 
-def parse_cookie(text):
-    for line in text.split("\n"):
-        if 'XSSID' in line:
-            return line.replace('setCookie("XSSID", "', '').replace('");', '').strip()
 
 async def async_setup_platform(
         hass, config, async_add_entities, discovery_info=None):
@@ -140,40 +132,52 @@ class ZyxelPoeData:
         self.async_update = Throttle(interval)(self._async_update)
 
     async def _login(self, is_retry=False):
-        if 'XSSID' in [c.key for c in self._session.cookie_jar]:
+        if 'HTTP_XSSID' in [c.key for c in self._session.cookie_jar]:
             return
 
         login_data = {
-            "login": 1,
             "username": self._username,
             "password": encode(self._password),
-            "dummy": current_time()
+            "login": 'true;',
         }
+
+        login_step1 = await self._session.post(self._url, data=login_data)
+        text = await login_step1.text()
 
         login_check_data = {
-            "login_chk": 1,
-            "dummy": current_time( )
+            "authId": text.strip(),
+            "login_chk": 'true',
         }
 
-        await self._session.get(self._url, params=login_data)
         await asyncio.sleep(1) # implicitely wait for login to occur
 
-        res = await self._session.get(self._url, params=login_check_data)
-        text = await res.text()
-        if not 'OK' in text:
+        login_step2 = await self._session.post(self._url, data=login_check_data)
+        text = await login_step2.text()
+
+        if 'OK' not in text:
             if is_retry:
-                raise Exception("Login failed: %s" % ret2.text)
-            self._session.cookie_jar.clear()
+                raise Exception("Login failed: %s" % login_step2.text)
             await self._login(is_retry=True)
 
-        res = await self._session.get(self._url, params={"cmd": 1})
-        text = await res.text()
-        cookie = parse_cookie(text)
-        self._session.cookie_jar.update_cookies({"XSSID": cookie})
-
     async def change_state(self, port, state, is_retry=False):
+        from bs4 import BeautifulSoup
+        try:
+            with async_timeout.timeout(10):
+                await self._login()
+
+                ret = await self._session.get(self._url, params={'cmd':'773'})
+                text = await ret.text()
+                if not ret.ok:
+                    raise Exception("Refresh failed. Got response: %s" % text)
+
+                soup = BeautifulSoup(text, 'html.parser')
+                xssid_content = soup.find('input', {'name': 'XSSID'}).get('value')
+        except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+            _LOGGER.error("Cannot load Zyxel data: %s", e)
+            return False
+
         command_data = {
-            "XSSID": [c.value for c in self._session.cookie_jar if c.key=='XSSID'][0],
+            "XSSID": xssid_content,
             "portlist": port,
             "state": state,
             "portPriority": 2,
@@ -209,15 +213,18 @@ class ZyxelPoeData:
             with async_timeout.timeout(10):
                 await self._login()
 
-                res = await self._session.get(self._url, params={'cmd':'773'})
-                text = await res.text()
-                data = BeautifulSoup(text, 'html.parser')
-                trs = data.find('table').find_all('table')[1].find_all('tr')[1:]
-                for tr in trs:
-                   tds = tr.find_all('td')
-                   if len(tds) != 13:
+                ret = await self._session.get(self._url, params={'cmd':'773'})
+                text = await ret.text()
+                if not ret.ok:
+                    raise Exception("Refresh failed. Got response: %s" % text)
+
+                soup = BeautifulSoup(text, 'html.parser')
+                table = soup.select("table")[2]
+                for row in table.find_all('tr'):
+                   cols = row.find_all('td')
+                   if len(cols) != 13:
                        continue
-                   _, _, port, state, pd_class, pd_priority, power_up, wide_range_detection, consuming_power_mw, max_power_mw, time_range_name, time_range_status, _ = map(lambda a: a.text.strip(), tds)
+                   _, _, port, state, pd_class, pd_priority, power_up, wide_range_detection, consuming_power_mw, max_power_mw, time_range_name, time_range_status, _ = map(lambda a: a.text.strip(), cols)
                    if state == 'Enable':
                        state = STATE_ON
                    elif state == 'Disable':
