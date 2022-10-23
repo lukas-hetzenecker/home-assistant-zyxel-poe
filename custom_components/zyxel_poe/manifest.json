@@ -2,6 +2,7 @@
   "domain": "zyxel_poe",
   "name": "ZyXEL",
   "documentation": "https://github.com/lukas-hetzenecker/home-assistant-zyxel-poe",
+  "issue_tracker": "https://github.com/lukas-hetzenecker/home-assistant-zyxel-poe/issues",
   "dependencies": [],
   "codeowners": [
     "@lukas-hetzenecker"
