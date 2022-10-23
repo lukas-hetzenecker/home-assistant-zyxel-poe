@@ -230,6 +230,7 @@ class ZyxelPoeData:
                 for row in table.find_all('tr'):
                    cols = row.find_all('td')
                    _LOGGER.debug(f"Found table with {len(cols)} elements")
+                   _LOGGER.debug(list(map(lambda a: a.text.strip(), cols)))
                    if len(cols) != 13:
                        continue
                    _, _, port, state, pd_class, pd_priority, power_up, wide_range_detection, consuming_power_mw, max_power_mw, time_range_name, time_range_status, _ = map(lambda a: a.text.strip(), cols)
