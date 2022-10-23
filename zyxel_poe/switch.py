@@ -16,6 +16,7 @@ from homeassistant.const import CONF_HOST, CONF_USERNAME, CONF_PASSWORD, CONF_SC
 import homeassistant.helpers.config_validation as cv
 from homeassistant.util import Throttle
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
+from homeassistant.exceptions import PlatformNotReady
 
 REQUIREMENTS = ['beautifulsoup4==4.7.1']
 
@@ -134,6 +135,7 @@ class ZyxelPoeData:
     async def _login(self, is_retry=False):
         if 'HTTP_XSSID' in [c.key for c in self._session.cookie_jar]:
             return
+        _LOGGER.debug("No credential info stored, performing a login")
 
         login_data = {
             "username": self._username,
@@ -141,8 +143,10 @@ class ZyxelPoeData:
             "login": 'true;',
         }
 
+        _LOGGER.debug(f"Logging in to: {self._url}")
         login_step1 = await self._session.post(self._url, data=login_data)
         text = await login_step1.text()
+        _LOGGER.debug(f"Step 1 returned status code: {login_step1.status}, text: {text}")
 
         login_check_data = {
             "authId": text.strip(),
@@ -153,11 +157,15 @@ class ZyxelPoeData:
 
         login_step2 = await self._session.post(self._url, data=login_check_data)
         text = await login_step2.text()
+        _LOGGER.debug(f"Step 2 returned status code: {login_step2.status}, text: {text}")
 
         if 'OK' not in text:
+            _LOGGER.warn("OK not found in login step 2")
             if is_retry:
                 raise Exception("Login failed: %s" % login_step2.text)
             await self._login(is_retry=True)
+        
+        _LOGGER.debug("Logged in successfully")
 
     async def change_state(self, port, state, is_retry=False):
         from bs4 import BeautifulSoup
@@ -168,13 +176,12 @@ class ZyxelPoeData:
                 ret = await self._session.get(self._url, params={'cmd':'773'})
                 text = await ret.text()
                 if not ret.ok:
-                    raise Exception("Refresh failed. Got response: %s" % text)
+                    raise PlatformNotReady("Refresh failed. Got response: %s" % text)
 
                 soup = BeautifulSoup(text, 'html.parser')
                 xssid_content = soup.find('input', {'name': 'XSSID'}).get('value')
-        except (asyncio.TimeoutError, aiohttp.ClientError) as e:
-            _LOGGER.error("Cannot load Zyxel data: %s", e)
-            return False
+        except (asyncio.TimeoutError, aiohttp.ClientError) as ex:
+            raise PlatformNotReady(f"Connection error while connecting to {self._url}: {ex}") from ex
 
         command_data = {
             "XSSID": xssid_content,
@@ -201,9 +208,8 @@ class ZyxelPoeData:
                     self._session.cookie_jar.clear()
                     await self._login(is_retry=True)
                     return await self.change_state(port, state, is_retry=True)
-        except (asyncio.TimeoutError, aiohttp.ClientError) as e:
-            _LOGGER.error("Cannot load Zyxel data: %s", e)
-            return False
+        except (asyncio.TimeoutError, aiohttp.ClientError) as ex:
+            raise PlatformNotReady(f"Connection error while connecting to {self._url}: {ex}") from ex
         return True
 
     async def _async_update(self):
@@ -215,13 +221,15 @@ class ZyxelPoeData:
 
                 ret = await self._session.get(self._url, params={'cmd':'773'})
                 text = await ret.text()
+                _LOGGER.debug(f"CMD 773 returned status code: {ret.status}")
                 if not ret.ok:
-                    raise Exception("Refresh failed. Got response: %s" % text)
+                    raise PlatformNotReady("Refresh failed. Got response: %s" % text)
 
                 soup = BeautifulSoup(text, 'html.parser')
                 table = soup.select("table")[2]
                 for row in table.find_all('tr'):
                    cols = row.find_all('td')
+                   _LOGGER.debug(f"Found table with {len(cols)} elements")
                    if len(cols) != 13:
                        continue
                    _, _, port, state, pd_class, pd_priority, power_up, wide_range_detection, consuming_power_mw, max_power_mw, time_range_name, time_range_status, _ = map(lambda a: a.text.strip(), cols)
@@ -243,6 +251,5 @@ class ZyxelPoeData:
                    }
                    self.ports[port] = port_attrs
 
-        except (asyncio.TimeoutError, aiohttp.ClientError) as e:
-            _LOGGER.error("Cannot load Zyxel data: %s", e)
-            return False
+        except (asyncio.TimeoutError, aiohttp.ClientError) as ex:
+            raise PlatformNotReady(f"Connection error while connecting to {self._url}: {ex}") from ex
