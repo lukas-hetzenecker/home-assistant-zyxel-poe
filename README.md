@@ -6,7 +6,13 @@ Because this functionality is not available via SNMP (WTF, ZyXEL?) it will be pe
 
 # Compatibility
 
-Tested with ZyXEL GS1900-10HP. Should be compatible with similar models.
+Tested with: 
+
+- ZyXEL GS1900-8HP
+- ZyXEL GS1900-10HP
+- ZyXEL GS1900-24EP
+
+Should be compatible with similar models.
 
 ## Installation 
 
