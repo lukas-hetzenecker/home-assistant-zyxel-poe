@@ -1,3 +1,6 @@
+[![hacs_badge](https://img.shields.io/badge/HACS-Default-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
+
+
 Manage the Power-over-Ethernet functionality of ZyXEL switches.
 Because this functionality is not available via SNMP (WTF, ZyXEL?) it will be performed over HTTP. Admin credentials are required.
 
